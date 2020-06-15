@@ -1,45 +1,70 @@
-"use strict";
+'use strict';
 
-const _ = require("lodash");
-const path = require("path");
-const stripAnsi = require("strip-ansi");
+const _ = require('lodash');
+const os = require('os');
+const path = require('path');
+const { promises: fs } = require('fs'); // eslint-disable-line node/no-unsupported-features/node-builtins
 
-function caseFilePath(caseNumber, fileName) {
-  return path.join(__dirname, caseNumber, fileName);
+const replaceBackslashes = require('../lib/testUtils/replaceBackslashes');
+
+function caseFilePath(caseNumber, fileName = 'stylesheet') {
+	return replaceBackslashes(path.join(__dirname, caseNumber, fileName));
 }
 
-function caseStylesheetGlob(caseNumber) {
-  return caseFilePath(caseNumber, "stylesheet.*");
+function caseFiles(caseNumber) {
+	return caseFilePath(caseNumber, 'stylesheet.*');
 }
 
-function caseConfig(caseNumber, ext) {
-  ext = ext || "json";
-
-  return caseFilePath(caseNumber, `config.${ext}`);
+function caseConfigFile(caseNumber, ext = 'json') {
+	return caseFilePath(caseNumber, `config.${ext}`);
 }
 
-function prepResults(results) {
-  return results.map(result => {
-    // The _postcssResult object is not part of our API and is huge
-    const preppedResult = _.omit(result, "_postcssResult");
-
-    // The `source` of each file will not be the same on different machines or platforms
-    preppedResult.source = path
-      .relative(__dirname, result.source)
-      .replace(new RegExp(`\\${path.sep}`, "g"), "/");
-
-    return preppedResult;
-  });
+async function caseConfig(caseNumber) {
+	return JSON.parse(await fs.readFile(caseConfigFile(caseNumber, 'json'), 'utf8'));
 }
 
-function stripColors(input) {
-  return stripAnsi(input);
+async function caseCode(caseNumber, ext = 'css') {
+	return await fs.readFile(`${caseFilePath(caseNumber)}.${ext}`, 'utf8');
+}
+
+async function caseFilesForFix(caseNumber, ext = 'css') {
+	const tempPath = replaceBackslashes(path.join(os.tmpdir(), `stylesheet-${_.uniqueId()}.${ext}`));
+
+	await fs.copyFile(path.join(__dirname, caseNumber, `stylesheet.${ext}`), tempPath);
+
+	return tempPath;
+}
+
+function prepForSnapshot({ results, output, ...rest }) {
+	// If output isn't fixed code
+	if (output.startsWith('[')) {
+		// The `source` of each file varies between platforms or if a tmp file is used
+		output = JSON.parse(output).map((warning) => {
+			delete warning.source;
+
+			return warning;
+		});
+	}
+
+	return {
+		// The _postcssResult object is not part of our API and is huge
+		results: results.map((result) => {
+			delete result.source;
+			delete result._postcssResult;
+
+			return result;
+		}),
+		output,
+		...rest,
+	};
 }
 
 module.exports = {
-  caseFilePath,
-  caseStylesheetGlob,
-  caseConfig,
-  prepResults,
-  stripColors
+	caseCode,
+	caseConfig,
+	caseConfigFile,
+	caseFilePath,
+	caseFilesForFix,
+	caseFiles,
+	prepForSnapshot,
 };
